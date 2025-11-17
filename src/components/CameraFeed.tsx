@@ -4,12 +4,14 @@ import { Card } from '@/components/ui/card';
 import { Camera, Square, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { extractVitalsWithOCR, OCRProgress } from '@/lib/ocr';
 import { monitorROIs, VitalsData } from '@/types/vitals';
 import VitalCard from './VitalCard';
 
 const CameraFeed = () => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<OCRProgress | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [latestVitals, setLatestVitals] = useState<VitalsData | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -74,7 +76,6 @@ const CameraFeed = () => {
         });
       }
     } catch (error) {
-      console.error('Error accessing camera:', error);
       toast({
         title: "Camera error",
         description: "Failed to access camera",
@@ -121,38 +122,38 @@ const CameraFeed = () => {
     const imageBase64 = canvas.toDataURL('image/jpeg', 0.95);
     setPreviewUrl(imageBase64);
     
-    try {
-      // Send to edge function for processing
-      const { data, error } = await supabase.functions.invoke('extract-vitals', {
-        body: { imageBase64, rois: monitorROIs }
-      });
-      
-      if (error) throw error;
-      
-      if (data?.vitals) {
-        // Store in database
-        const { error: insertError } = await supabase
-          .from('vitals')
-          .insert({
-            hr: data.vitals.HR,
-            pulse: data.vitals.Pulse,
-            spo2: data.vitals.SpO2,
-            abp: data.vitals.ABP,
-            pap: data.vitals.PAP,
-            etco2: data.vitals.EtCO2,
-            awrr: data.vitals.awRR,
-            source: 'camera'
-          });
-        
-        if (insertError) {
-          console.error('Error storing vitals:', insertError);
-        }
+    // Use Tesseract OCR to extract vitals (no longer throws errors)
+    const ocrResult = await extractVitalsWithOCR(
+      imageBase64,
+      monitorROIs,
+      (progress) => {
+        setOcrProgress(progress);
       }
-    } catch (error) {
-      console.error('Error processing frame:', error);
-    } finally {
-      setIsProcessing(false);
+    );
+    
+    // Store in database if vitals were extracted
+    if (ocrResult.vitals && Object.values(ocrResult.vitals).some(v => v !== null)) {
+      const { error: insertError } = await supabase
+        .from('vitals')
+        .insert({
+          hr: ocrResult.vitals.HR,
+          pulse: ocrResult.vitals.Pulse,
+          spo2: ocrResult.vitals.SpO2,
+          abp: ocrResult.vitals.ABP,
+          pap: ocrResult.vitals.PAP,
+          etco2: ocrResult.vitals.EtCO2,
+          awrr: ocrResult.vitals.awRR,
+          source: 'camera'
+        });
+      
+      if (!insertError) {
+        // Update latest vitals for display
+        setLatestVitals(ocrResult.vitals);
+      }
     }
+    
+    setIsProcessing(false);
+    setOcrProgress(null);
   };
 
   return (
@@ -160,7 +161,7 @@ const CameraFeed = () => {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
           <Camera className="w-6 h-6 text-primary" />
-          Real-time Camera Feed
+          Live Camera
         </h2>
         
         <div className="flex gap-2">
@@ -190,14 +191,26 @@ const CameraFeed = () => {
           <canvas ref={canvasRef} className="hidden" />
           
           {isProcessing && (
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-3">
               <Loader2 className="w-8 h-8 text-white animate-spin" />
+              {ocrProgress && (
+                <div className="text-white text-center px-4">
+                  <p className="text-sm font-medium">{ocrProgress.message}</p>
+                  <div className="w-48 h-2 bg-white/20 rounded-full mt-2 overflow-hidden">
+                    <div 
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{ width: `${ocrProgress.progress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs mt-1 text-white/80">{ocrProgress.progress}%</p>
+                </div>
+              )}
             </div>
           )}
         </div>
         
         <div className="bg-[hsl(var(--monitor-bg))] rounded-lg p-4 border-2 border-[hsl(var(--monitor-border))]">
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">Last Captured Frame</h3>
+          <h3 className="text-sm font-medium text-muted-foreground mb-3">Last Frame</h3>
           {previewUrl ? (
             <img src={previewUrl} alt="Last frame" className="w-full h-auto rounded" />
           ) : (
@@ -210,7 +223,7 @@ const CameraFeed = () => {
       
       <div className="mt-4 text-sm text-muted-foreground">
         {isCapturing && (
-          <p>• Capturing frames every 3 seconds • Frames are deleted after processing</p>
+          <p className="text-sm text-muted-foreground">Capturing every 3 seconds</p>
         )}
       </div>
 

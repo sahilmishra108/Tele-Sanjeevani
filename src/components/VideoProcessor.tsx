@@ -1,17 +1,62 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Upload, FileVideo, Download, Loader2 } from 'lucide-react';
+import { Upload, FileVideo, Download, Loader2, FileSpreadsheet } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { batchExtractVitals, OCRProgress } from '@/lib/ocr';
 import { monitorROIs, VitalsData } from '@/types/vitals';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 const VideoProcessor = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [ocrProgress, setOcrProgress] = useState<OCRProgress | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [latestVitals, setLatestVitals] = useState<VitalsData | null>(null);
+  const [allExtractedVitals, setAllExtractedVitals] = useState<Array<VitalsData & { timestamp: number; timeString: string }>>([]);
   const { toast } = useToast();
+
+  useEffect(() => {
+    // Subscribe to real-time updates for video source vitals
+    const channel = supabase
+      .channel('video-vitals-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'vitals',
+          filter: 'source=eq.video'
+        },
+        (payload) => {
+          if (payload.new) {
+            setLatestVitals({
+              HR: payload.new.hr,
+              Pulse: payload.new.pulse,
+              SpO2: payload.new.spo2,
+              ABP: payload.new.abp,
+              PAP: payload.new.pap,
+              EtCO2: payload.new.etco2,
+              awRR: payload.new.awrr
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -32,6 +77,8 @@ const VideoProcessor = () => {
     
     if (videoFile) {
       setVideoFile(videoFile);
+      setAllExtractedVitals([]);
+      setLatestVitals(null);
       toast({
         title: "Video loaded",
         description: videoFile.name,
@@ -49,6 +96,8 @@ const VideoProcessor = () => {
     const file = e.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
       setVideoFile(file);
+      setAllExtractedVitals([]);
+      setLatestVitals(null);
       toast({
         title: "Video loaded",
         description: file.name,
@@ -89,37 +138,121 @@ const VideoProcessor = () => {
       const totalFrames = Math.floor(duration / frameInterval);
       const allVitals: Array<VitalsData & { timestamp: number }> = [];
       
+      // Extract all frames first
+      const frames: string[] = [];
       for (let i = 0; i < totalFrames; i++) {
         const time = i * frameInterval;
         const imageBase64 = await extractFrameFromVideo(video, time);
-        
-        // Process frame with AI
-        const { data, error } = await supabase.functions.invoke('extract-vitals', {
-          body: { imageBase64, rois: monitorROIs }
-        });
-        
-        if (!error && data?.vitals) {
+        frames.push(imageBase64);
+        setProgress(Math.round(((i + 1) / totalFrames) * 50)); // First 50% for frame extraction
+      }
+
+      // Process all frames with Tesseract OCR
+      const ocrResults = await batchExtractVitals(
+        frames,
+        monitorROIs,
+        (current, total, imageProgress) => {
+          if (imageProgress) {
+            setOcrProgress(imageProgress);
+            // Second 50% for OCR processing
+            const baseProgress = 50;
+            const ocrProgressPercent = (imageProgress.progress / 100) * 50;
+            setProgress(Math.round(baseProgress + ocrProgressPercent));
+          } else {
+            setProgress(Math.round(50 + ((current / total) * 50)));
+          }
+        }
+      );
+
+      // Combine OCR results with timestamps and store in database
+      const baseTimestamp = new Date();
+      const vitalsToInsert: Array<{
+        hr: number | null;
+        pulse: number | null;
+        spo2: number | null;
+        abp: string | null;
+        pap: string | null;
+        etco2: number | null;
+        awrr: number | null;
+        source: string;
+        created_at: string;
+      }> = [];
+
+      const extractedVitalsWithTime: Array<VitalsData & { timestamp: number; timeString: string }> = [];
+      
+      for (let i = 0; i < ocrResults.length; i++) {
+        const time = i * frameInterval;
+        if (ocrResults[i].vitals) {
+          const vitals = ocrResults[i].vitals;
+          const timeString = `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, '0')}`;
+          
           allVitals.push({
-            ...data.vitals,
+            ...vitals,
             timestamp: time
           });
+
+          extractedVitalsWithTime.push({
+            ...vitals,
+            timestamp: time,
+            timeString
+          });
+
+          // Update latest vitals for display during processing
+          setLatestVitals(vitals);
+
+          // Prepare vitals for database insertion
+          // Use the video timestamp to create a realistic created_at time
+          const recordTimestamp = new Date(baseTimestamp.getTime() + time * 1000);
+          vitalsToInsert.push({
+            hr: vitals.HR,
+            pulse: vitals.Pulse,
+            spo2: vitals.SpO2,
+            abp: vitals.ABP,
+            pap: vitals.PAP,
+            etco2: vitals.EtCO2,
+            awrr: vitals.awRR,
+            source: 'video',
+            created_at: recordTimestamp.toISOString()
+          });
         }
-        
-        setProgress(Math.round(((i + 1) / totalFrames) * 100));
+      }
+
+      // Update all extracted vitals for table display
+      setAllExtractedVitals(extractedVitalsWithTime);
+
+      // Store all vitals in database
+      if (vitalsToInsert.length > 0) {
+        const { error: insertError } = await supabase
+          .from('vitals')
+          .insert(vitalsToInsert);
+
+        if (insertError) {
+          toast({
+            title: "Warning",
+            description: "Vitals extracted but failed to save to dashboard. CSV download available.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Success",
+            description: `Extracted and saved ${vitalsToInsert.length} vitals to dashboard`,
+          });
+        }
       }
       
       // Generate CSV
       const csvContent = generateCSV(allVitals);
       downloadCSV(csvContent, `vitals-${Date.now()}.csv`);
       
-      toast({
-        title: "Processing complete",
-        description: `Extracted ${allVitals.length} data points`,
-      });
+      if (vitalsToInsert.length === 0) {
+        toast({
+          title: "Processing complete",
+          description: `Extracted ${allVitals.length} data points`,
+        });
+      }
       
       URL.revokeObjectURL(video.src);
     } catch (error) {
-      console.error('Error processing video:', error);
       toast({
         title: "Processing failed",
         description: error instanceof Error ? error.message : 'Unknown error',
@@ -131,10 +264,10 @@ const VideoProcessor = () => {
     }
   };
 
-  const generateCSV = (data: Array<VitalsData & { timestamp: number }>) => {
-    const headers = ['Timestamp', 'HR (bpm)', 'Pulse (bpm)', 'SpO2 (%)', 'ABP (mmHg)', 'PAP (mmHg)', 'EtCO2 (mmHg)', 'awRR (/min)'];
+  const generateCSV = (data: Array<VitalsData & { timestamp: number; timeString?: string }>) => {
+    const headers = ['Time', 'HR (bpm)', 'Pulse (bpm)', 'SpO2 (%)', 'ABP (mmHg)', 'PAP (mmHg)', 'EtCO2 (mmHg)', 'awRR (/min)'];
     const rows = data.map(row => [
-      row.timestamp.toFixed(2),
+      row.timeString || `${Math.floor(row.timestamp / 60)}:${String(Math.floor(row.timestamp % 60)).padStart(2, '0')}`,
       row.HR ?? 'N/A',
       row.Pulse ?? 'N/A',
       row.SpO2 ?? 'N/A',
@@ -161,7 +294,7 @@ const VideoProcessor = () => {
     <Card className="p-6 bg-card border-border">
       <h2 className="text-2xl font-bold text-foreground flex items-center gap-2 mb-4">
         <FileVideo className="w-6 h-6 text-primary" />
-        Video Processor
+        Video Analysis
       </h2>
       
       <div
@@ -185,10 +318,10 @@ const VideoProcessor = () => {
         <label htmlFor="video-upload" className="cursor-pointer">
           <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
           <p className="text-lg font-medium text-foreground mb-2">
-            Drop video file here or click to browse
+            Drop video here or click to upload
           </p>
           <p className="text-sm text-muted-foreground">
-            Supported formats: MP4, MOV, AVI
+            MP4, MOV, or AVI files
           </p>
         </label>
       </div>
@@ -214,7 +347,7 @@ const VideoProcessor = () => {
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Processing {progress}%
+                  Processing with Tesseract OCR {progress}%
                 </>
               ) : (
                 <>
@@ -226,13 +359,83 @@ const VideoProcessor = () => {
           </div>
           
           {isProcessing && (
-            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-              <div 
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
+            <div className="space-y-2">
+              <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                <div 
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              {ocrProgress && (
+                <div className="text-sm text-muted-foreground">
+                  <p className="font-medium">{ocrProgress.message}</p>
+                  <p className="text-xs mt-1">Tesseract OCR: {ocrProgress.status}</p>
+                </div>
+              )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Vitals Table */}
+      {allExtractedVitals.length > 0 && (
+        <div className="mt-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-bold text-foreground">All Extracted Vitals</h3>
+            <Button
+              onClick={() => {
+                const csvContent = generateCSV(allExtractedVitals);
+                downloadCSV(csvContent, `vitals-table-${Date.now()}.csv`);
+                toast({
+                  title: "Export successful",
+                  description: "Vitals table exported to CSV",
+                });
+              }}
+              variant="outline"
+              className="gap-2"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Export Table to CSV
+            </Button>
+          </div>
+          
+          <Card className="border-border">
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-muted z-10">
+                  <TableRow>
+                    <TableHead className="font-semibold">Time</TableHead>
+                    <TableHead className="font-semibold">HR (bpm)</TableHead>
+                    <TableHead className="font-semibold">Pulse (bpm)</TableHead>
+                    <TableHead className="font-semibold">SpO2 (%)</TableHead>
+                    <TableHead className="font-semibold">ABP (mmHg)</TableHead>
+                    <TableHead className="font-semibold">PAP (mmHg)</TableHead>
+                    <TableHead className="font-semibold">EtCO2 (mmHg)</TableHead>
+                    <TableHead className="font-semibold">awRR (/min)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allExtractedVitals.map((vital, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-medium">{vital.timeString}</TableCell>
+                      <TableCell>{vital.HR ?? 'N/A'}</TableCell>
+                      <TableCell>{vital.Pulse ?? 'N/A'}</TableCell>
+                      <TableCell>{vital.SpO2 ?? 'N/A'}</TableCell>
+                      <TableCell>{vital.ABP ?? 'N/A'}</TableCell>
+                      <TableCell>{vital.PAP ?? 'N/A'}</TableCell>
+                      <TableCell>{vital.EtCO2 ?? 'N/A'}</TableCell>
+                      <TableCell>{vital.awRR ?? 'N/A'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="p-4 border-t border-border bg-muted/30">
+              <p className="text-sm text-muted-foreground">
+                Total records: <span className="font-semibold text-foreground">{allExtractedVitals.length}</span>
+              </p>
+            </div>
+          </Card>
         </div>
       )}
     </Card>

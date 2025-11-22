@@ -7,13 +7,19 @@ import { io } from 'socket.io-client';
 import { extractVitalsWithOCR, OCRProgress } from '@/lib/ocr';
 import { monitorROIs, VitalsData } from '@/types/vitals';
 import VitalCard from './VitalCard';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const CameraFeed = () => {
+interface CameraFeedProps {
+  patientId?: string | null;
+}
+
+const CameraFeed = ({ patientId }: CameraFeedProps) => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<OCRProgress | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [latestVitals, setLatestVitals] = useState<VitalsData | null>(null);
+  const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -23,8 +29,18 @@ const CameraFeed = () => {
     // Connect to Socket.io server
     const socket = io('http://localhost:3000');
 
+    if (patientId) {
+      socket.emit('join-patient', patientId);
+    }
+
     socket.on('vital-update', (newVital: any) => {
       if (newVital.source === 'camera') {
+        // If patientId is set, only update if it matches (backend sends to room, so it should match)
+        // But if backend sends global update, we might need to check patient_id
+        if (patientId && newVital.patient_id && newVital.patient_id.toString() !== patientId) {
+          return;
+        }
+
         setLatestVitals({
           HR: newVital.hr,
           Pulse: newVital.pulse,
@@ -34,6 +50,15 @@ const CameraFeed = () => {
           EtCO2: newVital.etco2,
           awRR: newVital.awrr
         });
+
+        setVitalsHistory(prev => {
+          const newHistory = [...prev, {
+            time: new Date().toLocaleTimeString(),
+            HR: newVital.hr,
+            SpO2: newVital.spo2
+          }];
+          return newHistory.slice(-20);
+        });
       }
     });
 
@@ -41,7 +66,7 @@ const CameraFeed = () => {
       stopCapture();
       socket.disconnect();
     };
-  }, []);
+  }, [patientId]);
 
   const startCapture = async () => {
     try {
@@ -131,6 +156,7 @@ const CameraFeed = () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
+            patient_id: patientId,
             hr: ocrResult.vitals.HR,
             pulse: ocrResult.vitals.Pulse,
             spo2: ocrResult.vitals.SpO2,
@@ -145,6 +171,14 @@ const CameraFeed = () => {
         if (response.ok) {
           // Update latest vitals for display
           setLatestVitals(ocrResult.vitals);
+          setVitalsHistory(prev => {
+            const newHistory = [...prev, {
+              time: new Date().toLocaleTimeString(),
+              HR: ocrResult.vitals?.HR,
+              SpO2: ocrResult.vitals?.SpO2
+            }];
+            return newHistory.slice(-20);
+          });
         }
       } catch (error) {
         console.error('Failed to save vitals:', error);
@@ -269,6 +303,29 @@ const CameraFeed = () => {
             value={latestVitals?.awRR ?? null}
             unit="/min"
           />
+        </div>
+      </div>
+
+      {/* Real-time Chart */}
+      <div className="mt-6">
+        <h3 className="text-xl font-bold text-foreground mb-4">Real-Time Trends</h3>
+        <div className="h-[300px] w-full bg-card border border-border rounded-lg p-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={vitalsHistory}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" />
+              <YAxis stroke="hsl(var(--muted-foreground))" />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))'
+                }}
+              />
+              <Legend />
+              <Line type="monotone" dataKey="HR" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="SpO2" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
     </Card>

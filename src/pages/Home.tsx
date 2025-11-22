@@ -10,15 +10,15 @@ const Home = () => {
       <header className="absolute top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm animate-fade-in">
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4 animate-slide-in-right">
-            <img 
-              src="/PATH_Logo_Color (1).png" 
-              alt="PATH Logo" 
+            <img
+              src="/PATH_Logo_Color (1).png"
+              alt="PATH Logo"
               className="h-10 w-auto transition-transform hover:scale-105"
             />
           </div>
-          <Link to="/dashboard" className="animate-slide-in-right group" style={{ animationDelay: '0.1s' }}>
+          <Link to="/patients" className="animate-slide-in-right group" style={{ animationDelay: '0.1s' }}>
             <Button className="bg-[#0066CC] hover:bg-[#0052A3] text-white shadow-md hover:shadow-lg transition-all hover:scale-105">
-              Access Platform
+              Patient Records
               <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
             </Button>
           </Link>
@@ -41,13 +41,13 @@ const Home = () => {
                   `,
                   backgroundSize: '50px 50px'
                 }}></div>
-                
+
                 {/* Star Pattern Background */}
                 <div className="absolute inset-0 opacity-15" style={{
                   backgroundImage: `radial-gradient(circle at 2px 2px, white 1px, transparent 0)`,
                   backgroundSize: '40px 40px'
                 }}></div>
-                
+
                 {/* Content */}
                 <div className="relative z-10 animate-fade-in-up">
                   {/* Title */}
@@ -62,21 +62,21 @@ const Home = () => {
                       Platform
                     </h2>
                   </div>
-                  
+
                   {/* Description */}
                   <p className="text-white/90 text-base md:text-lg lg:text-xl mb-8 leading-relaxed max-w-lg">
                     Advanced telemedicine infrastructure delivering real-time vital signs monitoring and comprehensive analytics for critical care environments.
                   </p>
-                  
-                  {/* Access Platform Button */}
-                  <Link to="/dashboard" className="inline-block mb-10">
+
+                  {/* View Patient Records Button */}
+                  <Link to="/patients" className="inline-block mb-10">
                     <Button size="lg" className="bg-white text-[#1e3a5f] hover:bg-white/90 text-base md:text-lg px-8 py-6 rounded-lg shadow-lg hover:shadow-xl transition-all hover:scale-105 group">
-                      <Camera className="w-5 h-5 mr-2" />
-                      Access Platform
+                      <FileVideo className="w-5 h-5 mr-2" />
+                      View Patient Records
                       <ArrowRight className="ml-2 w-5 h-5 transition-transform group-hover:translate-x-1" />
                     </Button>
                   </Link>
-                  
+
                   {/* Features with Checkmarks */}
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
@@ -94,12 +94,12 @@ const Home = () => {
                   </div>
                 </div>
               </div>
-              
+
               {/* Right Section - Hospital Image */}
               <div className="relative hidden md:block">
-                <img 
-                  src="/Gemini_Generated_Image_6xwqr56xwqr56xwq.png" 
-                  alt="ICU Monitoring Room" 
+                <img
+                  src="/Gemini_Generated_Image_6xwqr56xwqr56xwq.png"
+                  alt="ICU Monitoring Room"
                   className="w-full h-full object-cover"
                 />
                 {/* Subtle overlay for better text contrast if needed */}
@@ -119,68 +119,27 @@ const Home = () => {
               <span className="text-sm font-medium text-[#0066CC]">Healthcare Technology</span>
             </div>
             <h2 className="text-3xl md:text-4xl font-bold text-slate-800 max-w-3xl mx-auto mb-6 leading-tight">
-              Real-Time Patient Vital Signs Monitoring
+              Patient-Centric Vital Signs Monitoring
             </h2>
             <p className="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto mb-10 leading-relaxed">
-              Monitor patient vital signs remotely with cutting-edge OCR technology, 
-              real-time data analysis, and comprehensive dashboard insights for enhanced patient care.
+              Access comprehensive patient records with real-time vital signs monitoring, video analysis, and detailed health analytics—all organized by patient.
             </p>
-            <div className="flex gap-4 justify-center">
-              <Link to="/dashboard">
-                <Button size="lg" className="bg-[#0066CC] hover:bg-[#0052A3] text-white text-lg px-10 py-7 shadow-lg hover:shadow-xl transition-all hover:scale-105 group">
-                  Get Started
-                  <ArrowRight className="ml-2 w-5 h-5 transition-transform group-hover:translate-x-1" />
-                </Button>
-              </Link>
-            </div>
           </div>
 
-          {/* Features Grid with Direct Links */}
-          <div className="grid md:grid-cols-3 gap-8 mt-20">
-            <Link to="/dashboard?tab=camera" className="block">
-              <Card className="p-8 hover:shadow-xl transition-all duration-300 border border-slate-200 bg-white hover:border-[#0066CC]/30 group cursor-pointer h-full animate-fade-in-up">
-                <div className="w-16 h-16 bg-gradient-to-br from-[#0066CC] to-[#1E88E5] rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-lg">
-                  <Activity className="w-8 h-8 text-white" />
+          {/* Single Patient Records Card */}
+          <div className="flex justify-center mt-20">
+            <Link to="/patients" className="block max-w-md w-full">
+              <Card className="p-10 hover:shadow-2xl transition-all duration-300 border-2 border-slate-200 bg-white hover:border-[#0066CC] group cursor-pointer animate-fade-in-up">
+                <div className="w-20 h-20 bg-gradient-to-br from-[#0066CC] to-[#00897B] rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-lg mx-auto">
+                  <FileVideo className="w-10 h-10 text-white" />
                 </div>
-                <h3 className="text-2xl font-bold text-slate-800 mb-4">Real-Time Monitoring</h3>
-                <p className="text-slate-600 leading-relaxed mb-4">
-                  Monitor patient vital signs in real-time with live camera feeds and instant data processing for immediate clinical insights.
+                <h3 className="text-3xl font-bold text-slate-800 mb-4 text-center">Patient Records</h3>
+                <p className="text-slate-600 leading-relaxed mb-6 text-center">
+                  View all patients and access their comprehensive dashboards including real-time monitoring, video analysis, and vital signs history.
                 </p>
-                <div className="flex items-center text-[#0066CC] font-medium group-hover:translate-x-2 transition-transform">
-                  Access Real-Time Monitoring
-                  <ArrowRight className="ml-2 w-4 h-4" />
-                </div>
-              </Card>
-            </Link>
-
-            <Link to="/dashboard?tab=video" className="block">
-              <Card className="p-8 hover:shadow-xl transition-all duration-300 border border-slate-200 bg-white hover:border-[#00897B]/30 group cursor-pointer h-full animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-                <div className="w-16 h-16 bg-gradient-to-br from-[#00897B] to-[#00ACC1] rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-lg">
-                  <Camera className="w-8 h-8 text-white" />
-                </div>
-                <h3 className="text-2xl font-bold text-slate-800 mb-4">Video Processing</h3>
-                <p className="text-slate-600 leading-relaxed mb-4">
-                  Extract vital signs from video recordings using advanced OCR technology and AI-powered analysis for accurate patient data.
-                </p>
-                <div className="flex items-center text-[#00897B] font-medium group-hover:translate-x-2 transition-transform">
-                  Access Video Processing
-                  <ArrowRight className="ml-2 w-4 h-4" />
-                </div>
-              </Card>
-            </Link>
-
-            <Link to="/dashboard?tab=dashboard" className="block">
-              <Card className="p-8 hover:shadow-xl transition-all duration-300 border border-slate-200 bg-white hover:border-[#0066CC]/30 group cursor-pointer h-full animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-                <div className="w-16 h-16 bg-gradient-to-br from-[#0066CC] to-[#00897B] rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-lg">
-                  <FileVideo className="w-8 h-8 text-white" />
-                </div>
-                <h3 className="text-2xl font-bold text-slate-800 mb-4">Comprehensive Dashboard</h3>
-                <p className="text-slate-600 leading-relaxed mb-4">
-                  View detailed analytics, historical data, and export reports for comprehensive patient monitoring and care management.
-                </p>
-                <div className="flex items-center text-[#0066CC] font-medium group-hover:translate-x-2 transition-transform">
-                  Access Dashboard
-                  <ArrowRight className="ml-2 w-4 h-4" />
+                <div className="flex items-center justify-center text-[#0066CC] font-semibold text-lg group-hover:translate-x-2 transition-transform">
+                  View All Patients
+                  <ArrowRight className="ml-2 w-5 h-5" />
                 </div>
               </Card>
             </Link>

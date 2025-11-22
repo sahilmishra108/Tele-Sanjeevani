@@ -6,6 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import { io } from 'socket.io-client';
 import { batchExtractVitals, OCRProgress } from '@/lib/ocr';
 import { monitorROIs, VitalsData } from '@/types/vitals';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   Table,
   TableBody,
@@ -15,7 +16,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
-const VideoProcessor = () => {
+interface VideoProcessorProps {
+  patientId?: string | null;
+}
+
+const VideoProcessor = ({ patientId }: VideoProcessorProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -23,11 +28,16 @@ const VideoProcessor = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [latestVitals, setLatestVitals] = useState<VitalsData | null>(null);
   const [allExtractedVitals, setAllExtractedVitals] = useState<Array<VitalsData & { timestamp: number; timeString: string }>>([]);
+  const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
     // Connect to Socket.io server
     const socket = io('http://localhost:3000');
+
+    if (patientId) {
+      socket.emit('join-patient', patientId);
+    }
 
     socket.on('connect', () => {
       console.log('Connected to WebSocket server');
@@ -35,6 +45,9 @@ const VideoProcessor = () => {
 
     socket.on('vital-update', (newVital: any) => {
       if (newVital.source === 'video') {
+        if (patientId && newVital.patient_id && newVital.patient_id.toString() !== patientId) {
+          return;
+        }
         setLatestVitals({
           HR: newVital.hr,
           Pulse: newVital.pulse,
@@ -50,7 +63,7 @@ const VideoProcessor = () => {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [patientId]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -73,6 +86,7 @@ const VideoProcessor = () => {
       setVideoFile(videoFile);
       setAllExtractedVitals([]);
       setLatestVitals(null);
+      setVitalsHistory([]);
       toast({
         title: "Video loaded",
         description: videoFile.name,
@@ -92,6 +106,7 @@ const VideoProcessor = () => {
       setVideoFile(file);
       setAllExtractedVitals([]);
       setLatestVitals(null);
+      setVitalsHistory([]);
       toast({
         title: "Video loaded",
         description: file.name,
@@ -118,6 +133,7 @@ const VideoProcessor = () => {
 
     setIsProcessing(true);
     setProgress(0);
+    setVitalsHistory([]);
 
     try {
       const video = document.createElement('video');
@@ -161,6 +177,7 @@ const VideoProcessor = () => {
       // Combine OCR results with timestamps and store in database
       const baseTimestamp = new Date();
       const vitalsToInsert: Array<{
+        patient_id: string | null | undefined;
         hr: number | null;
         pulse: number | null;
         spo2: number | null;
@@ -194,10 +211,21 @@ const VideoProcessor = () => {
           // Update latest vitals for display during processing
           setLatestVitals(vitals);
 
+          // Update history for chart
+          setVitalsHistory(prev => {
+            const newHistory = [...prev, {
+              time: timeString,
+              HR: vitals.HR,
+              SpO2: vitals.SpO2
+            }];
+            return newHistory; // Keep all history for video analysis
+          });
+
           // Prepare vitals for database insertion
           // Use the video timestamp to create a realistic created_at time
           const recordTimestamp = new Date(baseTimestamp.getTime() + time * 1000);
           vitalsToInsert.push({
+            patient_id: patientId,
             hr: vitals.HR,
             pulse: vitals.Pulse,
             spo2: vitals.SpO2,
@@ -305,8 +333,8 @@ const VideoProcessor = () => {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${isDragging
-            ? 'border-primary bg-primary/5'
-            : 'border-border hover:border-primary/50'
+          ? 'border-primary bg-primary/5'
+          : 'border-border hover:border-primary/50'
           }`}
       >
         <input
@@ -376,6 +404,31 @@ const VideoProcessor = () => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Real-time Chart */}
+      {(vitalsHistory.length > 0 || isProcessing) && (
+        <div className="mt-6">
+          <h3 className="text-xl font-bold text-foreground mb-4">Extraction Trends</h3>
+          <div className="h-[300px] w-full bg-card border border-border rounded-lg p-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={vitalsHistory}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" />
+                <YAxis stroke="hsl(var(--muted-foreground))" />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))'
+                  }}
+                />
+                <Legend />
+                <Line type="monotone" dataKey="HR" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="SpO2" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       )}
 

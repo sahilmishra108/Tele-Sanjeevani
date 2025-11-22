@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Bell, AlertTriangle, TrendingUp, TrendingDown, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface VitalRecord {
   created_at: string;
@@ -13,6 +14,12 @@ interface VitalRecord {
   abp: string | null;
   pap: string | null;
   awrr: number | null;
+  patient_id?: number;
+}
+
+interface PatientInfo {
+  patient_id: number;
+  patient_name: string;
 }
 
 interface VitalAlert {
@@ -35,24 +42,19 @@ const VITAL_RANGES = {
   awRR: { min: 12, max: 20, low: 12, high: 20 },
 };
 
-const VitalNotifications = ({ vitals, compact = false }: { vitals: VitalRecord[]; compact?: boolean }) => {
+interface VitalNotificationsProps {
+  vitals: VitalRecord[];
+  compact?: boolean;
+  patient?: PatientInfo | null;
+}
+
+const VitalNotifications = ({ vitals, compact = false, patient }: VitalNotificationsProps) => {
   const [alerts, setAlerts] = useState<VitalAlert[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const alarmAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const previousAlertIdsRef = React.useRef<Set<string>>(new Set());
 
-  React.useEffect(() => {
-    // Initialize alarm sound - handle errors silently
-    try {
-      alarmAudioRef.current = new Audio('/alarm.wav');
-      alarmAudioRef.current.volume = 0.7;
-      // Preload the audio to avoid loading errors
-      alarmAudioRef.current.load();
-    } catch (error) {
-      // Silently handle audio initialization errors
-      alarmAudioRef.current = null;
-    }
-  }, []);
+  // Audio removed - no alarm sound
 
   useEffect(() => {
     if (vitals.length === 0) return;
@@ -169,19 +171,47 @@ const VitalNotifications = ({ vitals, compact = false }: { vitals: VitalRecord[]
       const vitalTypes = new Set(newAlerts.map(a => a.vital));
       const filteredPrev = prevAlerts.filter(a => !vitalTypes.has(a.vital));
       const updatedAlerts = [...filteredPrev, ...newAlerts].filter(a => !dismissedAlerts.has(a.id));
-      
+
       // Play alarm if new alerts appeared
       const newAlertIds = new Set(updatedAlerts.map(a => a.id));
       const hasNewAlerts = Array.from(newAlertIds).some(id => !previousAlertIdsRef.current.has(id));
-      
-      if (hasNewAlerts && updatedAlerts.length > 0 && alarmAudioRef.current) {
-        // Only play audio if user has interacted with the page
-        // Silently handle errors to avoid console noise
-        alarmAudioRef.current.play().catch(() => {
-          // Silently ignore autoplay policy errors
+
+      if (hasNewAlerts && updatedAlerts.length > 0) {
+        // Play audio if available
+        if (alarmAudioRef.current) {
+          alarmAudioRef.current.play().catch(() => { });
+        }
+
+        // Trigger Toast Notifications for new alerts
+        updatedAlerts.forEach(alert => {
+          if (newAlertIds.has(alert.id)) {
+            toast(
+              <div className="flex flex-col gap-1.5">
+                {patient && (
+                  <div className="text-xs font-semibold text-muted-foreground border-b pb-1">
+                    Patient: {patient.patient_name} (ID: #{patient.patient_id})
+                  </div>
+                )}
+                <span className="font-bold flex items-center gap-2">
+                  {alert.severity === 'critical' ? 'CRITICAL ALERT' : 'Vital Warning'}
+                  {alert.severity === 'critical' && <AlertTriangle className="w-4 h-4 text-red-600" />}
+                </span>
+                <span>
+                  {alert.vital} is {alert.type === 'high' ? 'High' : 'Low'}: <strong>{alert.value}</strong>
+                </span>
+              </div>,
+              {
+                duration: alert.severity === 'critical' ? 10000 : 5000,
+                position: 'top-right',
+                style: {
+                  borderLeft: alert.severity === 'critical' ? '4px solid red' : '4px solid orange',
+                }
+              }
+            );
+          }
         });
       }
-      
+
       previousAlertIdsRef.current = newAlertIds;
       return updatedAlerts;
     });

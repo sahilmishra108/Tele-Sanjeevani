@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
-import { TrendingUp, Filter, Download, RefreshCw } from 'lucide-react';
+import { Filter, Download, RefreshCw } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import VitalNotifications from './VitalNotifications';
+import PatientVitalMonitor from './PatientVitalMonitor';
 import {
   Table,
   TableBody,
@@ -26,11 +26,26 @@ interface VitalRecord {
   pap: string | null;
   awrr: number | null;
   source?: string;
+  patient_id?: number;
 }
 
-const Dashboard = () => {
+interface Patient {
+  patient_id: number;
+  patient_name: string;
+  age: number;
+  gender: string;
+  diagnosis: string;
+  admission_date: string;
+}
+
+interface DashboardProps {
+  patientId?: string | null;
+}
+
+const Dashboard = ({ patientId }: DashboardProps) => {
   const [vitalsHistory, setVitalsHistory] = useState<VitalRecord[]>([]);
   const [filteredVitals, setFilteredVitals] = useState<VitalRecord[]>([]);
+  const [patient, setPatient] = useState<Patient | null>(null);
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [averages, setAverages] = useState({
@@ -45,9 +60,16 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchVitalsHistory();
+    if (patientId) {
+      fetchPatientDetails();
+    }
 
     // Connect to Socket.io server
     const socket = io('http://localhost:3000');
+
+    if (patientId) {
+      socket.emit('join-patient', patientId);
+    }
 
     socket.on('vital-update', () => {
       fetchVitalsHistory();
@@ -56,15 +78,31 @@ const Dashboard = () => {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [patientId]);
 
   useEffect(() => {
     applyDateFilter();
   }, [vitalsHistory, dateFrom, dateTo]);
 
+  const fetchPatientDetails = async () => {
+    try {
+      const response = await fetch(`http://localhost:3000/api/patients/${patientId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setPatient(data);
+      }
+    } catch (error) {
+      console.error('Error fetching patient:', error);
+    }
+  };
+
   const fetchVitalsHistory = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/vitals?limit=1000');
+      const url = patientId
+        ? `http://localhost:3000/api/vitals/${patientId}`
+        : 'http://localhost:3000/api/vitals?limit=1000';
+
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         setVitalsHistory(data);
@@ -180,6 +218,12 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
+      {/* Patient Vital Monitor - Hidden component that monitors vitals and shows notifications */}
+      <PatientVitalMonitor 
+        vitals={vitalsHistory} 
+        patient={patient}
+      />
+
       {/* Banner Image */}
       <div className="relative w-full h-64 md:h-80 rounded-lg overflow-hidden">
         <img
@@ -189,9 +233,11 @@ const Dashboard = () => {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end">
           <div className="p-6 text-white">
-            <h1 className="text-3xl md:text-4xl font-bold mb-2">Patient Vitals Dashboard</h1>
+            <h1 className="text-3xl md:text-4xl font-bold mb-2">
+              {patient ? `${patient.patient_name}'s Dashboard` : 'Patient Vitals Dashboard'}
+            </h1>
             <p className="text-sm md:text-base text-white/90">
-              View patient vital signs and trends
+              {patient ? `${patient.diagnosis} - Admitted ${new Date(patient.admission_date).toLocaleDateString()}` : 'View patient vital signs and trends'}
             </p>
           </div>
         </div>
@@ -245,9 +291,6 @@ const Dashboard = () => {
         )}
       </Card>
 
-      {/* Vital Notifications */}
-      <VitalNotifications vitals={filteredVitals.length > 0 ? filteredVitals : vitalsHistory} />
-
       {/* Average Vitals */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <Card className="p-4 bg-card border-border">
@@ -287,52 +330,53 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Charts */}
-      <Card className="p-6 bg-card border-border">
-        <h2 className="text-xl font-bold text-foreground mb-4">Heart Rate and Pulse</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" />
-            <YAxis stroke="hsl(var(--muted-foreground))" />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: 'hsl(var(--card))',
-                border: '1px solid hsl(var(--border))'
-              }}
-            />
-            <Legend />
-            <Line type="monotone" dataKey="HR" stroke="hsl(var(--primary))" strokeWidth={2} />
-            <Line type="monotone" dataKey="Pulse" stroke="hsl(var(--vital-success))" strokeWidth={2} />
-          </LineChart>
-        </ResponsiveContainer>
-      </Card>
+      {/* Charts Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="p-6 bg-card border-border">
+          <h2 className="text-xl font-bold text-foreground mb-4">Heart Rate & Pulse</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" />
+              <YAxis stroke="hsl(var(--muted-foreground))" />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))'
+                }}
+              />
+              <Legend />
+              <Line type="monotone" dataKey="HR" stroke="hsl(var(--primary))" strokeWidth={2} />
+              <Line type="monotone" dataKey="Pulse" stroke="hsl(var(--vital-success))" strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
 
-      <Card className="p-6 bg-card border-border">
-        <h2 className="text-xl font-bold text-foreground mb-4">Oxygen and Carbon Dioxide</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" />
-            <YAxis stroke="hsl(var(--muted-foreground))" />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: 'hsl(var(--card))',
-                border: '1px solid hsl(var(--border))'
-              }}
-            />
-            <Legend />
-            <Line type="monotone" dataKey="SpO2" stroke="hsl(var(--chart-2))" strokeWidth={2} />
-            <Line type="monotone" dataKey="EtCO2" stroke="hsl(var(--chart-3))" strokeWidth={2} />
-          </LineChart>
-        </ResponsiveContainer>
-      </Card>
+        <Card className="p-6 bg-card border-border">
+          <h2 className="text-xl font-bold text-foreground mb-4">Oxygen Saturation (SpO2)</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" />
+              <YAxis domain={[80, 100]} stroke="hsl(var(--muted-foreground))" />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))'
+                }}
+              />
+              <Legend />
+              <Line type="monotone" dataKey="SpO2" stroke="hsl(var(--chart-2))" strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
 
       {/* Real-Time Monitoring Data Table */}
       <Card className="p-6 bg-card border-border">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-foreground mb-2">Real-Time Monitoring Data</h2>
+            <h2 className="text-2xl font-bold text-foreground mb-2">Detailed Vitals Log</h2>
             <p className="text-sm text-muted-foreground">
               Complete record of all vital signs monitoring sessions
             </p>
@@ -390,10 +434,10 @@ const Dashboard = () => {
                       </TableCell>
                       <TableCell>
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${record.source === 'camera'
-                            ? 'bg-blue-100 text-blue-700'
-                            : record.source === 'video'
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-gray-100 text-gray-700'
+                          ? 'bg-blue-100 text-blue-700'
+                          : record.source === 'video'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-700'
                           }`}>
                           {record.source?.toUpperCase() || 'N/A'}
                         </span>
